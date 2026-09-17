@@ -1,0 +1,128 @@
+library(readr)
+library(lubridate)
+library(dplyr)
+library(tidyverse)
+library(survminer)
+library(ggplot2)
+
+setwd("/Users/ck624/Library/CloudStorage/OneDrive-UniversityofCambridge/PhD Project (Will Brown)/Alemtuzumab and Cladribine Paper/Alemtuzumab_Propensity_Score/")
+
+#Import patient data
+patient_censored <- read_csv("")
+
+patients_visits <- patient_censored %>% select(c(PATIENT_ID, dateBlineVisit, bEDSS, NEXT_START_DATE))
+
+#Import disability data
+visits_total <- read_csv("")
+
+visits_edss <- visits_total %>% 
+  mutate(daysPostRelapse = last.relapse * (-1)) %>% 
+  select(-last.relapse)
+
+patients_visits <- patients_visits %>% 
+  left_join(visits_edss, by = "PATIENT_ID") %>% 
+  rename(ID = PATIENT_ID,
+         dateEDSS = DATE_OF_VISIT) %>% 
+  subset(dateEDSS > NEXT_START_DATE) %>% 
+  select(-NEXT_START_DATE) %>% 
+  rename(base.date = dateBlineVisit)
+
+library(MSoutcomes)
+
+patients_visits$bEDSS <- as.numeric(patients_visits$bEDSS)
+patients_visits$EDSS <- as.numeric(patients_visits$EDSS)
+patients_visits$base.date <- as.Date(patients_visits$base.date)
+patients_visits$dateEDSS <- as.Date(patients_visits$dateEDSS)
+
+############## CDW after new treat
+
+patients_CDW <- CDW(patients_visits, mconf = 6 * 30.25, tRelapse = 30, sustained = FALSE)
+patients_CDW_single <- patients_CDW %>% group_by(ID) %>% slice(1) %>% ungroup()
+
+patients_EDSS_CDW <- patient_censored %>% 
+  left_join(patients_CDW_single %>% 
+              mutate(CDW = 1) %>% 
+              select(ID, 
+                     CDW, 
+                     dateEDSS) %>% 
+              rename(PATIENT_ID = ID),
+            by = "PATIENT_ID")
+
+patients_EDSS_CDW <- patients_EDSS_CDW %>% 
+  mutate(CDW = replace_na(CDW, 0))
+
+patients_EDSS_CDW <- patients_EDSS_CDW %>% 
+  mutate(T2CDW = ifelse(CDW == 1, (dateEDSS - NEXT_START_DATE), (END_FOLLOW_UP - NEXT_START_DATE)))
+
+#Run Cox PH model
+
+library(survival)
+
+disability.cox.model <- coxph(Surv(T2CDW, CDW) ~ matchinggp + 
+                         #duration_relapse_treatment_cats + 
+                         #age_at_treat + 
+                         #disease_duration_at_treatmentchange +
+                         #GENDER +
+                         #NUM_RELAPSES_BEFORE_ALEM +
+                         #DMTRank_AMAL +
+                         #EDSS +
+                         #NUM_PREVIOUS_DMTS +
+                         cluster(pair_num), data = patients_EDSS_CDW, weights = weights) 
+
+res.zph <- cox.zph(disability.cox.model)
+res.zph #check proportionality hazards not violated
+plot(res.zph)
+
+#extract HR, p-value and CI if theres no violation of proportionality assumption
+
+HR <- as.data.frame(exp(coef(disability.cox.model)))
+HR <- HR["matchinggp",]
+CI <- as.data.frame(exp(confint(disability.cox.model)))
+CI <- CI["matchinggp",]
+LCI <- CI[1,1]
+UCI <- CI[1,2]
+pvalue <- as.data.frame(coef(summary(disability.cox.model)))
+pvalue <- pvalue["matchinggp",]
+pvalue <- as.data.frame(pvalue[,"Pr(>|z|)"])
+pvalue <- round(pvalue, digits=10)
+
+# create graph ------------------------------------------------------------
+
+#################  Proportion Free from Relapse   ###################
+
+# Keep only one row per patient
+patient_km <- patients_EDSS_CDW %>%
+   distinct(PATIENT_ID, .keep_all = TRUE)
+ 
+# Obtain Kaplan-Meier estimates
+fit.km  <- survfit(Surv(T2CDW, CDW) ~ matchinggp, 
+                   conf.type="log-log",
+                   data = patient_km)
+summary(fit.km)
+
+# Create cumulative incidence (risk) plot
+library(ggplot2)
+library(survminer)
+plot <- ggsurvplot(
+  fit.km, 
+  fun = "pct", # % free from
+  conf.int = TRUE, # include confidence intervals
+  censor = FALSE, # don't include tick marks for events/censorings
+  xlab = "Time from Treatment Change, Years", # label x-axis
+  break.x.by = 1, # display x-axis in 1-year bins
+  #surv.scale = "percent", # show y-axis in %
+  ylab = "% Free From Disability Worsening", # label y-axis
+  #ylim = c(0,0.6), # set limits of y-axis
+  xlim = c(0,3), # set limits of x-axis [chosen as this is where one group has <10% original population]
+  legend = c(0.2, 0.2), # set legend position
+  legend.labs = c("Alemtuzumab", "New DMT"),
+  legend.title = "Groups", # set legend title
+  palette = c("#E7B800", "#2E9FDF"), # set colors
+  risk.table = TRUE
+)
+plot
+
+png()
+
+
+dev.off()
