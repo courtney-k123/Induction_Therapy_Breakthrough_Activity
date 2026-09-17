@@ -1,0 +1,90 @@
+library(readr)
+library(lubridate)
+library(dplyr)
+library(tidyverse)
+library(MatchIt)
+setwd("")
+
+# Import Data
+
+cladribine <- read.csv("")
+
+# Generate Propensity scores and match
+m.out2 <- matchit(matchinggp ~ GENDER + 
+                    age + 
+                    disease_duration + 
+                    RELAPSES_BEFORE_CLAD + 
+                    EDSS + 
+                    DMTRank + 
+                    NUM_PREVIOUS_DMTS,
+                  data = cladribine, method = "nearest", replace = TRUE, ratio = 10, caliper = 0.1)
+
+DRT_DMTRANK <- summary(m.out2)
+matched_baseline_demographics2 <- as.data.frame(DRT_DMTRANK$sum.matched)
+unmatched_baseline_demographics2 <- as.data.frame(DRT_DMTRANK$sum.all) #matched 51
+summary(m.out2)
+plot(summary(m.out2))
+
+plot(m.out2, type = "jitter", interactive = FALSE)
+m.data2 <- match.data(m.out2) #creating df with variables and also the weights and distances
+
+#Create Dataframe to analyse patient pairs
+
+match.matrix <- as.data.frame(m.out2$match.matrix, stringsAsFactors = FALSE)
+match.matrix$treated.pat <- row.names(match.matrix)
+EDSS_pairs <- data.frame(PATIENT_ID_A=NA, PATIENT_ID_B=NA)
+
+for (i in 1:nrow(match.matrix)) {
+  if (!is.na(match.matrix$V1[i])) { 
+    temp <- c(match.matrix$treated.pat[i], match.matrix$V1[i])
+    EDSS_pairs <- rbind(EDSS_pairs,temp)}
+  if (!is.na(match.matrix$V2[i])) { 
+    temp <- c(match.matrix$treated.pat[i], match.matrix$V2[i])
+    EDSS_pairs <- rbind(EDSS_pairs,temp)}
+  if (!is.na(match.matrix$V3[i])) { 
+    temp <- c(match.matrix$treated.pat[i], match.matrix$V3[i])
+    EDSS_pairs <- rbind(EDSS_pairs,temp)}
+  if (!is.na(match.matrix$V4[i])) { 
+    temp <- c(match.matrix$treated.pat[i], match.matrix$V4[i])
+    EDSS_pairs <- rbind(EDSS_pairs,temp)}
+  if (!is.na(match.matrix$V5[i])) { 
+    temp <- c(match.matrix$treated.pat[i], match.matrix$V5[i])
+    EDSS_pairs <- rbind(EDSS_pairs,temp)}
+  if (!is.na(match.matrix$V6[i])) { 
+    temp <- c(match.matrix$treated.pat[i], match.matrix$V6[i])
+    EDSS_pairs <- rbind(EDSS_pairs,temp)}
+  if (!is.na(match.matrix$V7[i])) { 
+    temp <- c(match.matrix$treated.pat[i], match.matrix$V7[i])
+    EDSS_pairs <- rbind(EDSS_pairs,temp)}
+  if (!is.na(match.matrix$V8[i])) { 
+    temp <- c(match.matrix$treated.pat[i], match.matrix$V8[i])
+    EDSS_pairs <- rbind(EDSS_pairs,temp)}
+  if (!is.na(match.matrix$V9[i])) { 
+    temp <- c(match.matrix$treated.pat[i], match.matrix$V9[i])
+    EDSS_pairs <- rbind(EDSS_pairs,temp)}
+  if (!is.na(match.matrix$V10[i])) { 
+    temp <- c(match.matrix$treated.pat[i], match.matrix$V10[i])
+    EDSS_pairs <- rbind(EDSS_pairs,temp)}
+}
+EDSS_pairs <- EDSS_pairs[which(!is.na(EDSS_pairs$PATIENT_ID_A)),]
+EDSS_pairs <- EDSS_pairs[which(!(EDSS_pairs$PATIENT_ID_A == EDSS_pairs$PATIENT_ID_B)),]
+EDSS_pairs$pair_num <- seq(1,nrow(EDSS_pairs))
+
+pats.obj1 <- EDSS_pairs[,c("PATIENT_ID_A", "pair_num")] 
+colnames(pats.obj1) <- c("X", "pair_num")
+temp <- EDSS_pairs[,c("PATIENT_ID_B", "pair_num")]
+colnames(temp) <- c("X", "pair_num")    
+pats.obj1 <- rbind(pats.obj1, temp)
+pats.obj1 <- pats.obj1 %>% arrange(pair_num)
+m.data2$X <- row.names(m.data2)
+pats.obj1 <- merge(x=pats.obj1, y=m.data2, by="X", all.x = TRUE)
+pats.obj1 <- pats.obj1 %>% arrange(pair_num)
+pats.obj1 <- pats.obj1[,-1]
+
+#Create Weights based on Number of Times used in pairs
+freq.by.ID <- data.frame(table(pats.obj1$PATIENT_ID)) #this lists how many times each patient has been used
+pats.obj1$weights <- 1/freq.by.ID$Freq[match(pats.obj1$PATIENT_ID, freq.by.ID$Var1)] 
+
+#Save File 
+write_csv(") 
+
