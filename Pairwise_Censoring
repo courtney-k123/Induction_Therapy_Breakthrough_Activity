@@ -1,0 +1,63 @@
+#pairwise censoring followup
+library(readr)
+library(lubridate)
+library(dplyr)
+library(tidyverse)
+
+setwd("")
+
+#read in data for visits
+visits <- read_csv("")
+visits <- visits %>% select(c(PATIENT_ID, DATE_OF_VISIT, EDSS))
+
+#read in patient data 
+pats.obj1 <- read_csv("") 
+
+#Censor Follow Up
+visits <- visits[,c("PATIENT_ID","DATE_OF_VISIT")]#keep only patient id and date of visit
+pats.obj1_VISITS <- merge(x= pats.obj1, y=visits, by = "PATIENT_ID", all.x = TRUE)#merge so each matched patient has all their visit dates
+pats.obj1_VISITS$START_DATE <- as.Date(pats.obj1_VISITS$START_DATE)
+pats.obj1_VISITS <- pats.obj1_VISITS %>% 
+  filter(DATE_OF_VISIT > 
+           START_DATE)#take only dates of visit after the treatment change
+pats.obj1_VISITS <- pats.obj1_VISITS %>% 
+  group_by(PATIENT_ID) %>%
+  arrange(PATIENT_ID, DATE_OF_VISIT) %>% 
+  slice_tail(n=1)#take only the latest visit date for each patient
+pats.obj1_VISITS <- pats.obj1_VISITS[,c("PATIENT_ID","DATE_OF_VISIT")]#keep only patient id and latest visit date
+pats.obj1_VISITS <- merge(x=pats.obj1, y=pats.obj1_VISITS, by="PATIENT_ID")#combine with all matched patients
+
+table_pairnum <- table(pats.obj1_VISITS$pair_num)
+table_pairnum <- as.data.frame(table_pairnum)
+table_pairnum <- table_pairnum %>% rename(pair_num = Var1)
+pats.obj1_VISITS <- merge(x=pats.obj1_VISITS, y=table_pairnum, by = "pair_num", all.x = TRUE)
+pats.obj1_VISITS <- pats.obj1_VISITS %>% subset(Freq == 2)
+
+pats.obj1_VISITS$followup <- pats.obj1_VISITS$DATE_OF_VISIT - pats.obj1_VISITS$START_DATE
+
+pats.obj1_VISITS1 <- pats.obj1_VISITS %>% 
+  group_by(pair_num) %>% 
+  arrange(pair_num, followup) %>% 
+  slice(1)#within the matched pair, take the earliest visit date
+
+pats.obj1_VISITS2 <- pats.obj1_VISITS %>% 
+  group_by(pair_num) %>% 
+  arrange(pair_num, followup) %>% 
+  slice(2)#within the matched pair, take the later date
+pats.obj1_VISITS2$followup <- NA
+
+pats.obj1 <- rbind(pats.obj1_VISITS1, pats.obj1_VISITS2)#combine with matched patients 
+
+pats.obj1 <- pats.obj1 %>% 
+  group_by(pair_num) %>% 
+  arrange(pair_num, followup)
+  
+pats.obj1 <- fill(pats.obj1, followup)
+
+pats.obj1$END_FOLLOW_UP <- pats.obj1$START_DATE + pats.obj1$followup
+
+pats.obj1 <- pats.obj1 %>% select(-(followup))
+
+#Save file
+write_csv("")
+
