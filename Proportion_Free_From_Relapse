@@ -1,0 +1,95 @@
+library(readr)
+library(tidyverse)
+
+#Import Relapse data
+setwd("")
+relapses_total <- read_csv("")
+
+#Import patient data
+patient_censored <- read_csv("")
+
+#Calculate Time to Relapse
+relapses <- relapses_total[,c("PATIENT_ID","DATE_OF_ONSET","SEVERITY")]
+patient_censored_relapse <- merge(x=patient_censored, y=relapses, by = "PATIENT_ID", all.x = TRUE)
+patient_censored_relapse <- patient_censored_relapse %>% 
+  filter(DATE_OF_ONSET > START_DATE & DATE_OF_ONSET < END_FOLLOW_UP) %>%
+  group_by(PATIENT_ID) %>% 
+  arrange(PATIENT_ID, DATE_OF_ONSET) %>% 
+  slice(1)
+patient_censored_relapse$RELAPSE <- 1
+patient_censored_relapse$T2RELAPSE <- patient_censored_relapse$DATE_OF_ONSET - patient_censored_relapse$START_DATE
+patients_censored_norelapse <- patients_censored[which(!patients_censored$PATIENT_ID %in% patients_censored_relapse$PATIENT_ID),]
+patients_censored_norelapse$RELAPSE <- 0
+patient_censored_norelapse$T2RELAPSE <- patient_censored_norelapse$END_FOLLOW_UP - patient_censored_norelapse$START_DATE
+patient_censored <- rbind(patient_censored_relapse, patient_censored_norelapse)
+
+write.csv("")
+
+
+#Run Cox PH model
+library(survival)
+
+patient_censored$T2RELAPSE <- as.numeric(patient_censored$T2RELAPSE)
+patient_censored$RELAPSE <- as.numeric(patient_censored$RELAPSE)
+
+relapse.cox.model <- coxph(Surv(T2RELAPSE, RELAPSE) ~ matchinggp + 
+                         #duration_relapse_treatment_cats + 
+                         age + 
+                         #disease_duration +
+                         GENDER +
+                         RELAPSES_BEFORE_CLAD +
+                         #DMTRank_AMAL +
+                         #EDSS +
+                        #NUM_PREVIOUS_DMTS +
+                         cluster(pair_num), data = patient_censored, weights = weights) 
+
+res.zph <- cox.zph(relapse.cox.model)
+res.zph #check proportionality hazards not violated
+plot(res.zph)
+
+#extract HR, p-value and CI if theres no violation of proportionality assumption
+
+HR <- as.data.frame(exp(coef(relapse.cox.model)))
+HR <- HR["matchinggp",]
+CI <- as.data.frame(exp(confint(relapse.cox.model)))
+CI <- CI["matchinggp",]
+LCI <- CI[1,1]
+UCI <- CI[1,2]
+pvalue <- as.data.frame(coef(summary(relapse.cox.model)))
+pvalue <- pvalue["matchinggp",]
+pvalue <- as.data.frame(pvalue[,"Pr(>|z|)"])
+pvalue <- round(pvalue, digits=10)
+
+# create Weibull Survival Curves ------------------------------------------------------------
+
+#################  Proportion Free from Relapse   ###################
+
+# Obtain Kaplan-Meier estimates
+fit.km  <- survfit(Surv(T2RELAPSE, RELAPSE) ~ matchinggp, 
+                   conf.type="log-log",
+                   data = patient_censored)
+summary(fit.km)
+
+# Create cumulative incidence (risk) plot
+library(ggplot2)
+library(survminer)
+plot <- ggsurvplot(
+  fit.km, 
+  fun = "pct", # % free from
+  conf.int = TRUE, # include confidence intervals
+  censor = FALSE, # don't include tick marks for events/censorings
+  xlab = "Time from Treatment Change, Years", # label x-axis
+  break.x.by = 1, # display x-axis in 1-year bins
+  #surv.scale = "percent", # show y-axis in %
+  ylab = "% Free From Relapse", # label y-axis
+  #ylim = c(0,0.6), # set limits of y-axis
+  xlim = c(0,2), # set limits of x-axis [chosen as this is where one group has <10% original population]
+  legend = c(0.2, 0.2), # set legend position
+  legend.labs = c("New DMT", "Cladribine"),
+  legend.title = "Groups", # set legend title
+  palette = c("#E7B800", "#2E9FDF"), # set colors
+  risk.table = TRUE
+)
+
+plot
+png("")
